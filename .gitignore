@@ -1,0 +1,15 @@
+# build
+*.o
+*.bin
+*.iso
+*.elf
+*.map
+*.log
+com1.out
+qemu.log
+bochslog.txt
+
+# editors
+*.swp
+.vscode/
+.idea/
