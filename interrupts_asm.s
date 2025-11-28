@@ -1,100 +1,95 @@
-; nasm macros to create per interrupt stubs
-; common interrupts handler that normalizes stack, save registers, calls c function interrupt_handler)_
-;restores registers and stack
-bits 32
-extern interrupt_handler
+; interrupts_asm.s – 32-bit stubs for IDT entries 0–47 and load_idt
+BITS 32
+
+; ------------------------------------------------------------------
+; lidt helper called from C:
+;   void load_idt(unsigned int idt_ptr_address);
+; C pushes the argument on the stack, so at entry:
+;   [esp+4] = pointer to struct idt_ptr
+; ------------------------------------------------------------------
 global load_idt
-
-;macros for intterupts that d onot pus an eorro code
-%macro no_error_code_interrupt_handler 1
-global interrupt_handler_%1
-interrupt_handler_%1:
-    push dword 0 ; fake error code
-    push dword %1 ; interrupt number
-    jmp common_interrupt_handler
-%endmacro
-
-; Macro for interrupts that DO push an error code.
-%macro error_code_interrupt_handler 1
-global interrupt_handler_%1
-interrupt_handler_%1:
-    push dword %1         ; interrupt number
-    jmp  common_interrupt_handler
-%endmacro
-
-common_interrupt_handler:
-    ; [esp]   = int_num
-    ; [esp+4] = errcode (real or 0)
-    ; then CPU-pushed frame (eflags, cs, eip) or (errcode, eflags, cs, eip)
-
-    pushad
-    ; after pushad, int_num is at [esp+32]
-    push dword [esp + 32]
-    call interrupt_handler
-    add  esp, 4
-    popad
-
-    add  esp, 8        ; <-- drop int_num + errcode (real or fake)
-    iret               ; returns to saved eip/cs/eflags
-
-
-
-
-; === CPU exceptions ===
-no_error_code_interrupt_handler 0
-no_error_code_interrupt_handler 1
-no_error_code_interrupt_handler 2
-no_error_code_interrupt_handler 3
-no_error_code_interrupt_handler 4
-no_error_code_interrupt_handler 5
-no_error_code_interrupt_handler 6
-no_error_code_interrupt_handler 7
-error_code_interrupt_handler    8
-no_error_code_interrupt_handler 9
-error_code_interrupt_handler   10
-error_code_interrupt_handler   11
-error_code_interrupt_handler   12
-error_code_interrupt_handler   13
-error_code_interrupt_handler   14
-no_error_code_interrupt_handler 15
-no_error_code_interrupt_handler 16
-error_code_interrupt_handler   17
-no_error_code_interrupt_handler 18
-no_error_code_interrupt_handler 19
-no_error_code_interrupt_handler 20
-no_error_code_interrupt_handler 21
-no_error_code_interrupt_handler 22
-no_error_code_interrupt_handler 23
-no_error_code_interrupt_handler 24
-no_error_code_interrupt_handler 25
-no_error_code_interrupt_handler 26
-no_error_code_interrupt_handler 27
-no_error_code_interrupt_handler 28
-no_error_code_interrupt_handler 29
-no_error_code_interrupt_handler 30
-no_error_code_interrupt_handler 31
-
-; === IRQs after PIC remap: 0x20–0x2F ===
-no_error_code_interrupt_handler 32
-no_error_code_interrupt_handler 33
-no_error_code_interrupt_handler 34
-no_error_code_interrupt_handler 35
-no_error_code_interrupt_handler 36
-no_error_code_interrupt_handler 37
-no_error_code_interrupt_handler 38
-no_error_code_interrupt_handler 39
-no_error_code_interrupt_handler 40
-no_error_code_interrupt_handler 41
-no_error_code_interrupt_handler 42
-no_error_code_interrupt_handler 43
-no_error_code_interrupt_handler 44
-no_error_code_interrupt_handler 45
-no_error_code_interrupt_handler 46
-no_error_code_interrupt_handler 47
-
-; === IDT loader ===
-; void load_idt(unsigned int idt_ptr_address);
 load_idt:
     mov eax, [esp + 4]    ; eax = &idt_desc
-    lidt [eax]            ; load IDT register
+    lidt [eax]            ; load IDT from memory at that address
     ret
+
+; ------------------------------------------------------------------
+; Common ISR stubs: build struct regs on the stack and call
+;   void interrupt_handler(struct regs *r, unsigned int interrupt);
+; ------------------------------------------------------------------
+extern interrupt_handler
+
+%macro ISR_NOERR 1
+global interrupt_handler_%1
+interrupt_handler_%1:
+    ; Stack on entry (from ring3, no error code):
+    ;   [EIP, CS, EFLAGS, ESP, SS]
+
+    pushad                 ; save general-purpose registers
+
+    mov eax, esp           ; eax = struct regs* (points at EDI)
+
+    ; C calling convention: arguments are pushed right-to-left.
+    ; interrupt_handler(struct regs *r, unsigned int interrupt):
+    ;   push interrupt
+    ;   push r
+    push dword %1          ; 2nd arg: interrupt number
+    push eax               ; 1st arg: pointer to regs
+    call interrupt_handler
+    add esp, 8             ; pop both arguments
+
+    popad                  ; restore registers (possibly updated via *r)
+    iretd                  ; return using hardware frame (EIP, CS, ...)
+%endmacro
+
+; CPU exceptions 0–31
+ISR_NOERR 0
+ISR_NOERR 1
+ISR_NOERR 2
+ISR_NOERR 3
+ISR_NOERR 4
+ISR_NOERR 5
+ISR_NOERR 6
+ISR_NOERR 7
+ISR_NOERR 8
+ISR_NOERR 9
+ISR_NOERR 10
+ISR_NOERR 11
+ISR_NOERR 12
+ISR_NOERR 13
+ISR_NOERR 14
+ISR_NOERR 15
+ISR_NOERR 16
+ISR_NOERR 17
+ISR_NOERR 18
+ISR_NOERR 19
+ISR_NOERR 20
+ISR_NOERR 21
+ISR_NOERR 22
+ISR_NOERR 23
+ISR_NOERR 24
+ISR_NOERR 25
+ISR_NOERR 26
+ISR_NOERR 27
+ISR_NOERR 28
+ISR_NOERR 29
+ISR_NOERR 30
+ISR_NOERR 31
+
+; IRQs 0–15 (32–47)
+ISR_NOERR 32
+ISR_NOERR 33
+ISR_NOERR 34
+ISR_NOERR 35
+ISR_NOERR 36
+ISR_NOERR 37
+ISR_NOERR 38
+ISR_NOERR 39
+ISR_NOERR 40
+ISR_NOERR 41
+ISR_NOERR 42
+ISR_NOERR 43
+ISR_NOERR 44
+ISR_NOERR 45
+ISR_NOERR 46
+ISR_NOERR 47

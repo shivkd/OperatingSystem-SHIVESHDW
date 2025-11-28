@@ -1,33 +1,45 @@
 #include "framebuffer.h"
 #include "io.h"
 
-#define FB_WIDTH  80
-#define FB_HEIGHT 25
+#define FB_WIDTH   80
+#define FB_HEIGHT  25
 
-/* Memory-mapped VGA text framebuffer base.  */
-static volatile char *fb = (volatile char *)0x000B8000;
-
-/* Current cursor position in character cells (0 .. FB_WIDTH*FB_HEIGHT-1) */
-static unsigned int fb_pos = 0;
+#define VGA_MEM    ((unsigned short*)0xB8000)
 
 /* Default colors */
-static unsigned char fb_fg = FB_LIGHT_GREY;
-static unsigned char fb_bg = FB_BLACK;
+static unsigned char fb_fg = 0x00;
+static unsigned char fb_bg = 0x0A;
 
-/* fb_write_cell:
- * Writes character c and colors at cell index i (not byte offset).
- */
+/* Cursor in character coordinates */
+static unsigned int cursor_x = 0;
+static unsigned int cursor_y = 0;
+void fb_set_color(unsigned char fg, unsigned char bg)
+{
+    fb_fg = bg;
+    fb_bg = fg;
+}
+
+
+
+/* Write a character cell at (x,y) with given colors */
+static void fb_put_cell_xy(unsigned int x, unsigned int y,
+                           char c, unsigned char fg, unsigned char bg)
+{
+    unsigned short attr = ((fg & 0x0F) << 4) | (bg & 0x0F);
+    VGA_MEM[y * FB_WIDTH + x] = ((unsigned short)attr << 8) | (unsigned char)c;
+}
+
+/* fb_write_cell, kept for compatibility: index i = y*FB_WIDTH + x */
 void fb_write_cell(unsigned int i, char c,
                    unsigned char fg, unsigned char bg)
 {
-    unsigned int offset = i * 2;        /* 2 bytes per cell: char + attr */
-    fb[offset]     = c;
-    fb[offset + 1] = ((fg & 0x0F) << 4) | (bg & 0x0F);
+    unsigned int x = i % FB_WIDTH;
+    unsigned int y = i / FB_WIDTH;
+    if (y >= FB_HEIGHT) return;  /* ignore out-of-range */
+    fb_put_cell_xy(x, y, c, fg, bg);
 }
 
-/* fb_move_cursor:
- * Moves hardware cursor to character position pos. 
- */
+/* Move hardware cursor */
 void fb_move_cursor(unsigned short pos)
 {
     outb(FB_COMMAND_PORT, FB_HIGH_BYTE_COMMAND);
@@ -36,44 +48,71 @@ void fb_move_cursor(unsigned short pos)
     outb(FB_DATA_PORT,    (unsigned char)(pos & 0x00FF));
 }
 
-/* Clear screen to spaces with current colors and reset cursor. */
-void fb_clear(void)
+/* Scroll screen up by one line if we’ve gone past the last row */
+static void fb_scroll(void)
 {
-    unsigned int i;
-    for (i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
-        fb_write_cell(i, ' ', fb_fg, fb_bg);
+    if (cursor_y < FB_HEIGHT)
+        return;
+
+    /* move rows 1..24 to rows 0..23 */
+    for (unsigned int row = 1; row < FB_HEIGHT; row++) {
+        unsigned int src = row * FB_WIDTH;
+        unsigned int dst = (row - 1) * FB_WIDTH;
+        for (unsigned int col = 0; col < FB_WIDTH; col++) {
+            VGA_MEM[dst + col] = VGA_MEM[src + col];
+        }
     }
 
-    fb_pos = 0;
-    fb_move_cursor(fb_pos);
+    /* clear last row */
+    unsigned short blank = (((fb_fg & 0x0F) << 4) | (fb_bg & 0x0F));
+    blank = (blank << 8) | ' ';
+    for (unsigned int col = 0; col < FB_WIDTH; col++) {
+        VGA_MEM[(FB_HEIGHT - 1) * FB_WIDTH + col] = blank;
+    }
+
+    cursor_y = FB_HEIGHT - 1;
 }
 
-/* Internal helper: write single character, handle newline and cursor. */
+/* Clear screen and reset cursor */
+void fb_clear(void)
+{
+    unsigned short blank = (((fb_fg & 0x0F) << 4) | (fb_bg & 0x0F));
+    blank = (blank << 8) | ' ';
+
+    for (unsigned int i = 0; i < FB_WIDTH * FB_HEIGHT; i++) {
+        VGA_MEM[i] = blank;
+    }
+
+    cursor_x = 0;
+    cursor_y = 0;
+    fb_move_cursor(0);
+}
+
+/* Internal: print one character with scrolling */
 static void fb_put_char(char c)
 {
     if (c == '\n') {
-        /* Move to start of next line */
-        fb_pos += FB_WIDTH - (fb_pos % FB_WIDTH);
+        cursor_x = 0;
+        cursor_y++;
+        fb_scroll();
     } else {
-        fb_write_cell(fb_pos, c, fb_fg, fb_bg);
-        fb_pos++;
+        fb_put_cell_xy(cursor_x, cursor_y, c, fb_fg, fb_bg);
+        cursor_x++;
+        if (cursor_x >= FB_WIDTH) {
+            cursor_x = 0;
+            cursor_y++;
+            fb_scroll();
+        }
     }
 
-    /* No scrolling yet: wrap to top if we overflow */
-    if (fb_pos >= FB_WIDTH * FB_HEIGHT) {
-        fb_pos = 0;
-    }
-
-    fb_move_cursor((unsigned short)fb_pos);
+    unsigned short pos = (unsigned short)(cursor_y * FB_WIDTH + cursor_x);
+    fb_move_cursor(pos);
 }
 
-/* fb_write:
- * Writes len bytes from buf to the screen, updates cursor, returns len. 
- */
+/* Public write API */
 int fb_write(const char *buf, unsigned int len)
 {
-    unsigned int i;
-    for (i = 0; i < len; i++) {
+    for (unsigned int i = 0; i < len; i++) {
         fb_put_char(buf[i]);
     }
     return (int)len;

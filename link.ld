@@ -6,7 +6,7 @@ SECTIONS
 
   .text ALIGN(0x1000) :
   {
-    *(.text)
+    *(.text*)
   }
 
   .rodata ALIGN(0x1000) :
@@ -16,12 +16,15 @@ SECTIONS
 
   .data ALIGN(0x1000) :
   {
-    *(.data)
+    *(.data*)
   }
 
   .bss ALIGN(0x1000) :
   {
     *(COMMON)
-    *(.bss)
+    *(.bss*)
   }
+
+  /* Define a symbol at the current location (end of kernel) */
+  kernel_end = .;
 }

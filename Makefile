@@ -1,23 +1,23 @@
 # Object files in the kernel
 OBJECTS = loader.o kmain.o framebuffer.o io.o serial.o gdt.o gdt_flush.o \
            interrupts.o interrupts_asm.o pic.o keyboard.o \
-           tss.o tss_flush.o usermode.o
+           tss.o tss_flush.o usermode.o paging.o frame_alloc.o \
+           fs.o initfs.o syscall.o syscall_asm.o proc.o pit.o
 
-
-
-# Tools
-CC      = gcc
+# Toolchains
+CC      = gcc      # for 32-bit kernel C files (with CFLAGS)
 AS      = nasm
 LD      = ld
+HOSTCC  = gcc      # normal host compiler for tools/mkinitfs
 
-# C compiler flags (book version)
+# C compiler flags (kernel)
 CFLAGS  = -m32 -nostdlib -nostdinc -fno-builtin -fno-stack-protector \
           -nostartfiles -nodefaultlibs -Wall -Wextra -Werror -c
 
 # Assembler flags (32-bit ELF)
 ASFLAGS = -f elf32
 
-# Linker flags (same linker script as chapter 2)
+# Linker flags
 LDFLAGS = -T link.ld -melf_i386
 
 # Default target
@@ -27,7 +27,7 @@ all: kernel.elf
 kernel.elf: $(OBJECTS)
 	$(LD) $(LDFLAGS) $(OBJECTS) -o $@
 
-# Build the ISO (optional, matches book; you already have iso/ set up)
+# Optional ISO target from the book
 os.iso: kernel.elf
 	cp kernel.elf iso/boot/kernel.elf
 	genisoimage -R                              \
@@ -41,27 +41,39 @@ os.iso: kernel.elf
 	            -o os.iso                       \
 	            iso
 
-# Run the kernel directly via QEMU (simpler than BIOS+GRUB on WSL)
+# Run the kernel directly via QEMU
 run: kernel.elf
 	qemu-system-i386 -kernel kernel.elf \
 	                 -serial file:com1.out \
 	                 -monitor stdio
 
-
-# Pattern rule: compile any .c to .o
+# Generic: compile any .c to .o
 %.o: %.c
 	$(CC) $(CFLAGS) $< -o $@
 
-# Pattern rule: assemble any .s to .o
+# Generic: assemble any .s to .o
 %.o: %.s
 	$(AS) $(ASFLAGS) $< -o $@
 
-ASFLAGS = -f elf32   # or -f elf, just stay consistent with your other .s
-
+# Explicit rule for interrupts_asm.s if you want it
 interrupts_asm.o: interrupts_asm.s
 	$(AS) $(ASFLAGS) $< -o $@
 
+# -------- initfs tool + image + object --------
+
+# Build host-side tool to pack initfs/ into initfs.img
+tools/mkinitfs: tools/mkinitfs.c fs.h
+	$(HOSTCC) tools/mkinitfs.c -o tools/mkinitfs
+
+# Build the initfs image from the initfs/ directory
+initfs.img: tools/mkinitfs
+	tools/mkinitfs initfs initfs.img
+
+# Convert initfs.img into an ELF object linked into the kernel
+initfs.o: initfs.img
+	objcopy -I binary -O elf32-i386 -B i386 initfs.img initfs.o
 
 # Clean build products
 clean:
-	rm -f *.o kernel.elf os.iso
+	rm -f *.o kernel.elf os.iso initfs.img
+	rm -f tools/mkinitfs
