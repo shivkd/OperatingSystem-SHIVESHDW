@@ -107,4 +107,3 @@ From the project root:
 ```bash
 make
 qemu-system-i386 -kernel kernel.elf -serial file:serial.log -monitor stdio 
-and you can inspect serial.log files for outputs. 
