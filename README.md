@@ -11,10 +11,6 @@ It boots directly under QEMU, shows a boot log + ASCII banner, and then runs two
 
 ## Screenshots
 
-> Make sure these files are in your repo:
-> - `docs/shiveshos-boot.png`
-> - `docs/shiveshos-demo.png`
-
 ### Boot + Banner
 
 ![ShiveshOS boot screen](docs/shiveshos-boot.png)
